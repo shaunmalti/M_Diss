@@ -92,8 +92,8 @@ def main():
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
 
-    if not os.path.exists('out/'):
-        os.makedirs('out/')
+    if not os.path.exists('out_gan/'):
+        os.makedirs('out_gan/')
 
     i = 0
 
@@ -102,7 +102,7 @@ def main():
             samples = sess.run(G_sample, feed_dict={Z: sample_Z(16, Z_dim)})
 
             fig = plot(samples)
-            plt.savefig('out/{}.png'.format(str(i).zfill(3)), bbox_inches='tight')
+            plt.savefig('out_gan/{}.png'.format(str(i).zfill(3)), bbox_inches='tight')
             i += 1
             plt.close(fig)
 
