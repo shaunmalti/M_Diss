@@ -17,7 +17,7 @@ import matplotlib as mpl
 
 # Random Walk without a drift
 np.random.seed(1)
-n_samples = 1000
+n_samples = 100000
 
 
 def tsplot(y, lags=None, figsize=(10, 8), style='bmh'):
@@ -49,6 +49,6 @@ for t in range(n_samples):
     x[t] = x[t-1] + w[t]
 
 _ = tsplot(np.diff(x), lags=30)
-np.savetxt('rand_walk.csv',x,delimiter=',')
+np.savetxt('rand_walk.csv',np.diff(x),delimiter=',')
 plt.show()
 
