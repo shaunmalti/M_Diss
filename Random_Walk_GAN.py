@@ -7,12 +7,18 @@ from keras.activations import relu
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Sequential, Model
-from keras.optimizers import Adam, RMSprop
+from keras.optimizers import Adam, RMSprop, SGD
 from keras import backend as K
+import keras.models as km
 from keras.initializers import RandomNormal
 from random import randint, uniform
+from keras.callbacks import EarlyStopping
 import csv
-from sklearn.preprocessing import normalize
+from sklearn.preprocessing import MinMaxScaler, normalize
+import sys
+import datetime
+import time
+import matplotlib.pyplot as plt
 
 def import_csv():
     with open('rand_walk.csv') as csvfile:
@@ -25,13 +31,16 @@ def import_csv():
 
 def D():
     model = Sequential()
-
     # define discriminator model architecture
-    model.add(LSTM(1, batch_input_shape=(1,1,1),stateful=True,kernel_initializer='random_uniform',
-                   bias_initializer='zeros',return_sequences=True))
-    model.add(LeakyReLU(alpha=0.2))
-    model.add(LSTM(5))
-    model.add(LeakyReLU(alpha=0.2))
+    model.add(LSTM(1, batch_input_shape=(10,1,1),return_sequences=True))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
+    model.add(LSTM(5,return_sequences=True))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
+    model.add(LSTM(2))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
     model.add(Dense(1,activation='sigmoid'))
     model.summary()
 
@@ -43,11 +52,18 @@ def G():
 
     # (NumberOfSamples, TimeSteps, Features)
     # define generator model architecture
-    model.add(LSTM(1, batch_input_shape=(1,1,1),stateful=True,kernel_initializer='random_uniform',
-                   bias_initializer='zeros',return_sequences=True))
-    model.add(LeakyReLU(alpha=0.2))
-    model.add(LSTM(5))
-    model.add(LeakyReLU(alpha=0.2))
+    model.add(LSTM(1, batch_input_shape=(10,1,1),return_sequences=True))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
+    model.add(BatchNormalization(momentum=0.8))
+    model.add(LSTM(5,return_sequences=True,dropout=0.5))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
+    model.add(BatchNormalization(momentum=0.8))
+    model.add(LSTM(2,dropout=0.5))
+    # model.add(LeakyReLU(alpha=0.2))
+    # model.add(Activation('relu'))
+    model.add(BatchNormalization(momentum=0.8))
     model.add(Dense(1,activation='tanh'))
     model.add(Reshape((1,1)))
     model.summary()
@@ -55,63 +71,155 @@ def G():
     return model
 
 
-def train(data, gen_model, disc_model, combined, batch_size=1, epochs=10):
-    # adversarial ground truths
-    valid = np.ones((batch_size,1))
-    fake = np.zeros((batch_size,1))
-    data = np.reshape(data,(data.shape[0],1,1))
+def train(data,disc_model,gen_model,combined,scalar,batch_size=10,train_steps=50):
+    # Adversarial ground truths
+    valid = np.ones((batch_size, 1))
+    # valid = np.random.normal(0.7,1.2,size=[batch_size,1])
+    fake = np.zeros((batch_size, 1))
 
-    for epoch in range(epochs):
-        # define noise to be fed into generator
-        noise = np.random.normal(0, 1, (1,1,1))
-
-       # generated data
-        gen_data = gen_model(tf.convert_to_tensor(noise,dtype=tf.float32))
+    # for w in range(0,10):
+    x = 0
+    for i in range(train_steps):
+        np.random.seed(1)
+        noise = np.random.normal(-1,1,size=[batch_size,1,1])
+        # TODO this should be replaced by gen_model.predict()
+        # gen_data = gen_model(tf.convert_to_tensor(noise,tf.float32))
+        gen_data = gen_model.predict(noise)
+        data_ten = get_next_ten(data,x)
+        data_ten = np.reshape(data_ten, (10, 1, 1))
 
         # train discriminator
-        # TODO error in line under - lstm3 input expects 3 dimensions but  have array with shape 99999,1
-        # TODO added line that does np.reshape outside for loop to fix this
-        d_loss_real = disc_model.train_on_batch(data, valid)
-        d_loss_fake = disc_model.train_on_batch()
+        d_loss_real = disc_model.train_on_batch(data_ten, valid)
+        d_loss_fake = disc_model.train_on_batch(gen_data, fake)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
         # reset discriminator state due to lstm
         disc_model.reset_states()
 
         # train generator
-        noise = np.random.normal(0, 1, (batch_size, 1))
+        np.random.seed(1)
+        noise = np.random.normal(-1, 1, (10, 1, 1))
+        # TODO should this be here?
+        # gen_data_g = gen_model(tf.convert_to_tensor(noise, dtype=tf.float32))
+
         g_loss = combined.train_on_batch(noise, valid)
 
         # reset generator state due to lstm
         gen_model.reset_states()
 
+        # TODO - is this wrong?
+        print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
+        # print(data_ten)
+        # print(gen_model.layers)
+        # print(gen_model.layers[1].get_weights())
+        # print(gen_model.layers[2].get_weights()[0])
+        # print(gen_model.layers[3].get_weights()[0])
+        x += 1
+
+
 
 def main():
+    # setting random seed for reproductability
+    np.random.seed(1)
+    start_time = time.time()
     data = import_csv() # imported data is stationary
-    # might have to do reshaped_data = np.reshape(data,(-1,1)) later on
+    data_orig = data.copy()
+    data = data[0:9000]
+    # do it for the first 1000 - then perform test prediction
+    # split data
+    tf.reset_default_graph()
+    optimiser = Adam(lr=0.001,beta_1=0.9,beta_2=0.999,epsilon=0.5)
+    # optimiser = 'rmsprop'
+    K.set_learning_phase(1)
 
-    optimiser = Adam(0.0002,0.5)
+    # perform normalisation
+    # scalar = MinMaxScaler(feature_range=(0,1))
+    # data = scalar.fit_transform(data)
+    data_series = pd.DataFrame(data)
+    scalar = MinMaxScaler(feature_range=(-1,1))
+    data = scalar.fit_transform(data_series)
+    # TODO scalar.inverse_transform(data) at the end to get the data
 
     # build generator
-    z = Input(shape=(1, 1))
+    z = Input(shape=(1,1,),dtype=tf.float32)
     gen_model = G()
     # TODO check the commented line - should it be here?
-    # gen_model.compile(loss='mean_squared_logarithmic_error',optimizer=optimiser)
+    gen_model.compile(loss='mse',optimizer=optimiser,metrics=['accuracy'])
     output_gen = gen_model(z)
 
     # build discriminator
     disc_model = D()
     # only train generator
+    # TODO - the .trainable False was removed - leads to better loss values
     disc_model.trainable = False
     # discriminator takes output from generator and determines probability
     prob_disc = disc_model(output_gen)
     # compile discriminator
-    disc_model.compile(loss='mean_squared_logarithmic_error',optimizer=optimiser)
+    sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+    disc_model.compile(loss='mse',optimizer=sgd,metrics=['accuracy'])
 
     # combined model
-    combined = Model(z, prob_disc)
-    combined.compile(loss='mean_squared_logarithmic_error',optimizer=optimiser)
+    # TODO commented to try other method
+    # combined = Model(z, prob_disc)
 
-    train(data, gen_model, disc_model, combined, batch_size=1, epochs=10)
+    combined = Sequential()
+    combined.add(gen_model)
+    combined.add(disc_model)
+    combined.compile(loss='mse',optimizer=optimiser,metrics=['accuracy'])
+
+    # train model
+    # TODO commented to try other method
+    # train(data, gen_model, disc_model, combined, batch_size=1)
+
+    train(data,disc_model,gen_model,combined,scalar)
+
+    # perform one test maybe
+    np.random.seed(1)
+    noise = np.random.normal(-1, 1, (10, 1, 1))
+    # gen_data_d = gen_model(tf.convert_to_tensor(noise, dtype=tf.float32))
+    # print(gen_data_d)
+    to_predict = data[490:500].copy()
+    to_predict = np.reshape(to_predict, (10, 1, 1))
+    to_predict = np.float32(to_predict)
+    answer = gen_model.predict(to_predict)
+    answer_r = answer.copy().reshape((10,1))
+    un_normed_answer = scalar.inverse_transform(answer_r)
+    answer_n = gen_model.predict(noise)
+    answer_rn = answer_n.copy().reshape((10, 1))
+    un_normed_answer_n = scalar.inverse_transform(answer_rn)
+    print('******DATA USED******')
+    print('DATA: ',scalar.inverse_transform(data[490:500]))
+    print('******ANSWERS WITH DATA BEING USED AS INPUT INTO GENERATOR******')
+    print('UNNORMALISED ANSWER: ',un_normed_answer[0])
+    print('NORMALISED ANSWER: ',answer_r[0])
+    print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer)[0])
+    print('******ANSWERS WITH NOISE BEING USED AS INPUT INTO GENERATOR******')
+    print('UNNORMALISED ANSWER: ',un_normed_answer_n[0])
+    print('NORMALISED ANSWER: ',answer_rn[0])
+    print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer_n)[0])
+    print('******ACTUAL ANSWER******')
+    print('UNNORMALISED: ',scalar.inverse_transform(data[500].reshape(1,-1)))
+    print('NORMALISED: ', data[500])
+    print('Time taken: ', time.time()-start_time)
+    print('******TOTAL GEN ANSWER******')
+    print('NOISE ANSWER UNNORMED')
+    print(un_normed_answer_n)
+    print('INPUT ANSWER UNNORMED')
+    print(un_normed_answer)
+    print('MSE w/ data: ',((un_normed_answer - data[500:510]) ** 2).mean(axis=0))
+    print('MSE w/ noise: ',((un_normed_answer_n - data[500:510]) ** 2).mean(axis=0))
+    plt.plot(un_normed_answer_n,color='green',label='Unnormed Answer Noise')
+    plt.plot(un_normed_answer, color='red',label='Unnormed Answer Data')
+    plt.plot(scalar.inverse_transform(data[500:510]),color='blue',label='Actual Answer')
+    plt.legend()
+    plt.show()
+
+def get_next_ten(data,x):
+    if x == 0:
+        return data[0:10]
+    else:
+        return data[x*10:((x*10)+10)]
+
 
 if __name__ == '__main__':
     main()

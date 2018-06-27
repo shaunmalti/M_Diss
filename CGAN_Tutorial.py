@@ -100,7 +100,7 @@ def main():
 
     i = 0
 
-    for it in range(1000000):
+    for it in range(10000):
         if it % 1000 == 0:
             n_sample = 16
 
