@@ -5,12 +5,14 @@ from keras.layers import Dense, Input
 from keras.models import Sequential
 from keras.optimizers import SGD,Adam
 import matplotlib.pyplot as plt
+from progressbar import ProgressBar
 
 def G():
     model = Sequential()
 
     model.add(Dense(1,input_dim=1))
     model.add(Dense(2))
+    model.add(Dense(5))
     model.add(Dense(1))
     model.summary()
 
@@ -23,6 +25,7 @@ def D():
 
     model.add(Dense(1, input_dim=1))
     model.add(Dense(2))
+    model.add(Dense(5))
     model.add(Dense(1))
     model.summary()
 
@@ -33,12 +36,9 @@ def D():
 def main():
     # setting random seed for reproducable values
     np.random.seed(1)
-    data = np.random.choice([-1,1],size=10000)
+    data = np.random.choice([-1,1],size=1000)
     unique,counts = np.unique(data,return_counts=True)
     data_dict = dict(zip(unique,counts))
-    print(data)
-    print(data_dict)
-    # optimiser = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=0.5)
     optimiser = Adam()
 
     z = Input(shape=[1])
@@ -64,17 +64,24 @@ def main():
     list_ans = []
     for i in range(0,100):
         noise_t = np.random.normal(-1,1,size=[1])
-        list_ans.append(np.reshape(gen_model.predict(noise_t),1))
+        ans = np.reshape(gen_model.predict(noise_t),1)
+        if ans > 0:
+            list_ans.append(1)
+        else:
+            list_ans.append(-1)
 
-    plt.plot(list_ans)
-    plt.show()
+    unique,counts = np.unique(list_ans,return_counts=True)
+    ans_dict = dict(zip(unique,counts))
+    print('Original Distribution: ', data_dict)
+    print('Generated Distribution: ', ans_dict)
 
 
 def train(gen_model,disc_model,combined,data):
     valid = np.ones((1,1))
     fake = np.ones((1,1))
+    pbar = ProgressBar()
 
-    for i in range(0,len(data)):
+    for i in pbar(range(0,len(data))):
         np.random.seed(1)
         noise = np.random.normal(-1,1,size=[1])
 
@@ -89,7 +96,7 @@ def train(gen_model,disc_model,combined,data):
 
         g_loss = combined.train_on_batch(noise_2,valid)
 
-        print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
+        # print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
 
 
 
