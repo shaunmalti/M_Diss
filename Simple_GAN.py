@@ -1,70 +1,124 @@
 # Making a simple GAN which maps distribution of -1, 1 choices
 # this should be a 50/50 split
 import numpy as np
-from keras.layers import Dense, Input
+from keras.layers import Dense, Input, LeakyReLU, Flatten
 from keras.models import Sequential
 from keras.optimizers import SGD,Adam
 import matplotlib.pyplot as plt
 from progressbar import ProgressBar
+from keras.models import Model
+import tensorflow as tf
+import time
 
 def G():
     model = Sequential()
 
-    model.add(Dense(1,input_dim=1))
-    model.add(Dense(2))
-    model.add(Dense(5))
-    model.add(Dense(1))
+    model.add(Dense(1,input_dim=1,activation=None))
+    model.add(Dense(2,activation=None))
+    model.add(Dense(3,activation=None))
+    model.add(Dense(1,activation=None))
     model.summary()
 
-    return model
+    noise = Input(shape=[1])
+    ans = model(noise)
+
+    return Model(noise,ans)
 
 
 
 def D():
     model = Sequential()
 
-    model.add(Dense(1, input_dim=1))
+    model.add(Dense(1,input_dim=1))
+    model.add(LeakyReLU(alpha=0.2))
     model.add(Dense(2))
-    model.add(Dense(5))
-    model.add(Dense(1))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(3))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(1,activation='sigmoid'))
     model.summary()
 
-    return model
+    value = Input(shape=[1])
+    prob = model(value)
 
+    return Model(value,prob)
+
+
+
+def train(gen_model,disc_model,combined,data):
+    valid = np.ones((1,1))
+    fake = np.ones((1,1))
+    d_loss_arr = []
+    g_loss_arr = []
+    for i in range(0,len(data)):
+
+        # TRAIN DISCRIMINATOR
+        np.random.seed(1)
+        noise = np.random.normal(-1,1,size=[1])
+        # noise = np.random.choice([-1,1],size=[1])
+
+        gen_data = gen_model.predict(noise)
+
+        d_loss_real = disc_model.train_on_batch(np.reshape(data[i],[1,1]),valid)
+        d_loss_fake = disc_model.train_on_batch(gen_data,fake)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+        d_loss_arr.append(d_loss)
+        # TRAIN GENERATOR
+
+        # TO BE REMOVED
+        disc_model.trainable = False
+        temptest = disc_model.predict(gen_data)
+        temptest2 = combined.predict(noise)
+        # TO BE REMOVED
+
+        np.random.seed(1)
+        noise_2 = np.random.normal(-1,1,size=[1])
+
+        g_loss = combined.train_on_batch(noise_2,valid)
+        g_loss_arr.append(g_loss)
+        print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
+        print(disc_model.predict(gen_data))
+
+    plt.plot(d_loss_arr,color='r')
+    plt.plot(g_loss_arr,color='b')
+    plt.show()
 
 
 def main():
     # setting random seed for reproducable values
     np.random.seed(1)
-    data = np.random.choice([-1,1],size=1000)
+    data = np.random.choice([-1,1],size=500)
     unique,counts = np.unique(data,return_counts=True)
     data_dict = dict(zip(unique,counts))
     optimiser = Adam()
 
-    z = Input(shape=[1])
+    disc_model = D()
+    disc_model.compile(loss='mse', optimizer=optimiser)
 
     gen_model = G()
-    gen_model.compile(loss='mse', optimizer=optimiser, metrics=['accuracy'])
-    # output_gen = gen_model(z)
 
-    disc_model = D()
+    z = Input(shape=[1])
+    output_gen = gen_model(z)
 
     disc_model.trainable = False
 
-    sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-    disc_model.compile(loss='mse',optimizer=optimiser,metrics=['accuracy'])
+    prob = disc_model(output_gen)
 
-    combined = Sequential()
-    combined.add(gen_model)
-    combined.add(disc_model)
-    combined.compile(loss='mse', optimizer=optimiser, metrics=['accuracy'])
+    combined = Model(z,prob)
+    combined.compile(loss='mse', optimizer=optimiser)
+
 
     train(gen_model,disc_model,combined,data)
 
     list_ans = []
-    for i in range(0,100):
+    actual_ans = []
+    # np.random.seed(1)
+    np.random.seed(seed=int(time.time()))
+    for i in range(0,50):
         noise_t = np.random.normal(-1,1,size=[1])
-        ans = np.reshape(gen_model.predict(noise_t),1)
+        ans = gen_model.predict(noise_t)
+        print(ans)
+        actual_ans.append(ans)
         if ans > 0:
             list_ans.append(1)
         else:
@@ -72,32 +126,26 @@ def main():
 
     unique,counts = np.unique(list_ans,return_counts=True)
     ans_dict = dict(zip(unique,counts))
+    # print(actual_ans)
     print('Original Distribution: ', data_dict)
     print('Generated Distribution: ', ans_dict)
 
+    noise_t = np.random.normal(-1, 1, size=[1])
+    ans = gen_model.predict(noise_t)
+    print('Noise Value: ', noise_t)
+    print('Predicted Ans, ',ans)
+    print('Disc Output, ',disc_model.predict(ans))
+    print('Combined output, ',combined.predict(noise_t))
 
-def train(gen_model,disc_model,combined,data):
-    valid = np.ones((1,1))
-    fake = np.ones((1,1))
-    pbar = ProgressBar()
+    print('Separate Test')
+    print('Inputting Random Value')
+    np.random.seed(seed=int(time.time()))
+    print(gen_model.predict([[np.random.normal(-1, 1, size=[1])]]))
+    print('Inputting Random Value')
+    print(gen_model.predict([[np.random.normal(-1, 1, size=[1])]]))
 
-    for i in pbar(range(0,len(data))):
-        np.random.seed(1)
-        noise = np.random.normal(-1,1,size=[1])
-
-        gen_data = gen_model.predict(noise)
-
-        d_loss_real = disc_model.train_on_batch(np.reshape(data[i],[1,1]),valid)
-        d_loss_fake = disc_model.train_on_batch(gen_data,fake)
-        d_loss = 0.5 * np.add(d_loss_fake,d_loss_real)
-
-        np.random.seed(1)
-        noise_2 = np.random.normal(-1,1,size=[1])
-
-        g_loss = combined.train_on_batch(noise_2,valid)
-
-        # print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
-
+    # plt.plot(actual_ans)
+    # plt.show()
 
 
 if __name__ == '__main__':
