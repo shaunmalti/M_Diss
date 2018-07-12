@@ -44,15 +44,15 @@ def D():
 
 def train(gen_model,disc_model,combined,data):
     valid = np.ones((1,1))
-    fake = np.ones((1,1))
+    fake = np.zeros((1,1))
     d_loss_arr = []
     g_loss_arr = []
     for i in range(0,len(data)):
 
-        # define batches
-        start_num = int(np.random.uniform(0,1)*len(data))
-        if start_num > (len(data)-10):
-            start_num -= 10
+        # # define batches
+        # start_num = int(np.random.uniform(0,1)*len(data))
+        # if start_num > (len(data)-10):
+        #     start_num -= 10
 
         # pick batches
 
@@ -84,15 +84,16 @@ def train(gen_model,disc_model,combined,data):
         print(i, ' [D loss:', d_loss, '] [G loss:', g_loss, ']')
         print(disc_model.predict(gen_data))
 
-    plt.plot(d_loss_arr,color='r')
-    plt.plot(g_loss_arr,color='b')
+    plt.plot(d_loss_arr,color='r',label='D')
+    plt.plot(g_loss_arr,color='b',label='G')
+    plt.legend()
     plt.show()
 
 
 def main():
     # setting random seed for reproducable values
     np.random.seed(1)
-    data = np.random.choice([-1,1],size=500)
+    data = np.random.choice([-1,1],size=100)
     unique,counts = np.unique(data,return_counts=True)
     data_dict = dict(zip(unique,counts))
     # TODO - best till now with this Adam
