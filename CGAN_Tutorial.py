@@ -106,7 +106,7 @@ def main():
 
             Z_sample = sample_Z(n_sample, Z_dim)
             y_sample = np.zeros(shape=[n_sample, y_dim])
-            y_sample[:, 7] = 1
+            y_sample[:, 6] = 1
 
             samples = sess.run(G_sample, feed_dict={Z: Z_sample, y:y_sample})
 
