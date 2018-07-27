@@ -6,16 +6,27 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import time
 
-def def_placeholders(batch_size, seq_length, latent_dim, num_features):
+def def_placeholders(batch_size, seq_length, latent_dim, num_features, cond=False):
     X = tf.placeholder(tf.float32, [batch_size, seq_length, num_features])
     Z = tf.placeholder(tf.float32, [batch_size, seq_length, latent_dim])
+
+    # 3 BECAUSE WILL FEED FREQUENCY OF DESIRED AND AMPLITUDE HIGH/LOW
+    if cond is True:
+        CG = tf.placeholder(tf.float32, [batch_size, 1])
+        CD = tf.placeholder(tf.float32, [batch_size, 1])
+        return Z, X, CG, CD
     return Z, X
 
 
-def def_loss(Z, X, seq_length, batch_size):
-    G_sample = generator(Z, seq_length, batch_size)
-    D_real, D_logit_real = discriminator(X, seq_length, batch_size)
-    D_fake, D_logit_fake = discriminator(G_sample, seq_length, batch_size, reuse=True)
+def def_loss(Z, X, seq_length, batch_size, cond_option=False, CG=None, CD=None):
+    if cond_option is False:
+        G_sample = generator(Z, seq_length, batch_size)
+        D_real, D_logit_real = discriminator(X, seq_length, batch_size)
+        D_fake, D_logit_fake = discriminator(G_sample, seq_length, batch_size, reuse=True)
+    else:
+        G_sample = generator(Z, seq_length, batch_size, CG, cond_option)
+        D_real, D_logit_real = discriminator(X, seq_length, batch_size, CD, cond_option)
+        D_fake, D_logit_fake = discriminator(G_sample, seq_length, batch_size, CG, cond_option, reuse=True)
 
     D_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_real, labels=tf.ones_like(D_logit_real)), 1)
     D_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.zeros_like(D_logit_fake)), 1)
@@ -26,7 +37,7 @@ def def_loss(Z, X, seq_length, batch_size):
     return D_loss, G_loss
 
 
-def generator(Z, seq_length, batch_size, num_generated_features=1 ,hidden_units_g=100, reuse=False, learn_scale=True):
+def generator(Z, seq_length, batch_size, CG=None, cond=False,  num_generated_features=1 ,hidden_units_g=100, reuse=False, learn_scale=True):
     with tf.variable_scope("generator") as scope:
         if reuse:
             scope.reuse_variables()
@@ -34,15 +45,17 @@ def generator(Z, seq_length, batch_size, num_generated_features=1 ,hidden_units_
         b_out_G_initializer = tf.truncated_normal_initializer()
         scale_out_G_initializer = tf.constant_initializer(value=1.0)
         lstm_initializer = None
-        bias_start = 1.0
 
         W_out_G = tf.get_variable(name='W_out_G', shape=[hidden_units_g, num_generated_features],
                                   initializer=W_out_G_initializer)
         b_out_G = tf.get_variable(name='b_out_G', shape=num_generated_features, initializer=b_out_G_initializer)
         scale_out_G = tf.get_variable(name='scale_out_G', shape=1, initializer=scale_out_G_initializer,
                                       trainable=learn_scale)
-
-        inputs = Z
+        if cond is True:
+            condition = tf.stack([CG] * seq_length, axis=1)
+            inputs = tf.concat([Z, condition], axis=2)
+        else:
+            inputs = Z
 
         cell = LSTMCell(num_units=hidden_units_g, state_is_tuple=True, initializer=lstm_initializer, reuse=reuse)
 
@@ -56,16 +69,20 @@ def generator(Z, seq_length, batch_size, num_generated_features=1 ,hidden_units_
     return output_3d
 
 
-def discriminator(X, seq_length, batch_size, hidden_units_d=100, reuse=False):
+def discriminator(X, seq_length, batch_size, CD=None, cond=False, hidden_units_d=100, reuse=False):
     with tf.variable_scope("discriminator") as scope:
         if reuse:
             scope.reuse_variables()
 
         W_out_D = tf.get_variable(name='W_out_D', shape=[hidden_units_d, 1],
-                initializer=tf.truncated_normal_initializer())
+                                  initializer=tf.truncated_normal_initializer())
         b_out_D = tf.get_variable(name='b_out_D', shape=1,
-                initializer=tf.truncated_normal_initializer())
-        inputs = X
+                                  initializer=tf.truncated_normal_initializer())
+        if cond is True:
+            condition = tf.stack([CD] * seq_length, axis=1)
+            inputs = tf.concat([X, condition], axis=2)
+        else:
+            inputs = X
 
         cell = tf.contrib.rnn.LSTMCell(num_units=hidden_units_d, state_is_tuple=True, reuse=reuse)
         rnn_outputs, rnn_states = tf.nn.dynamic_rnn(cell=cell, dtype=tf.float32, inputs=inputs)
@@ -91,54 +108,84 @@ def sample_Z(batch_size, seq_length, latent_dim):
     sample = np.float32(np.random.normal(size=[batch_size, seq_length, latent_dim]))
     return sample
 
-def get_next_batch(batch_num, batch_size, samples):
+def get_next_batch(batch_num, batch_size, samples, cond, cond_array):
     sample_num_start = batch_num * batch_size
     sample_num_end = sample_num_start + batch_size
-    return samples[sample_num_start:sample_num_end]
+    if cond is True:
+        return samples[sample_num_start:sample_num_end], cond_array[sample_num_start:sample_num_end]
+    else:
+        return samples[sample_num_start:sample_num_end]
 
 
 def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_solver,
-                 X, Z, D_loss, G_loss, G_sample, epoch):
+                 X, Z, D_loss, G_loss, G_sample, epoch, CG=None, CD=None, cond_array=None, cond_option=False):
     D_rounds = 5
     G_rounds = 1
 
     for i in range(0,int(len(samples) / batch_size)):
-    # for i in range(0, 10):
         # update discriminator
         for d in range(D_rounds):
-            X_batch = get_next_batch(i, batch_size, samples)
+            if cond_option is True:
+                X_batch, Y_batch = get_next_batch(i, batch_size, samples, cond_option, cond_array)
+            else:
+                X_batch = get_next_batch(i, batch_size, samples)
             Z_batch = sample_Z(batch_size, seq_length, latent_dim)
-
-            _ = sess.run(D_solver, feed_dict={X: X_batch, Z: Z_batch})
+            if cond_option is True:
+                # TODO this should be cond dimensionality (second 1)
+                Y_batch = Y_batch.reshape(-1, 1)
+                _ = sess.run(D_solver, feed_dict={X: X_batch, Z: Z_batch, CD: Y_batch, CG: Y_batch})
+            else:
+                _ = sess.run(D_solver, feed_dict={X: X_batch, Z: Z_batch})
 
         # update generator
         for g in range(G_rounds):
-            _ = sess.run(G_solver,feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim)})
+            if cond_option is True:
+                X_batch, Y_batch = get_next_batch(i, batch_size, samples, cond_option, cond_array)
+                # TODO this should be cond dimensionality (second 1)
+                Y_batch = Y_batch.reshape(-1, 1)
+                _ = sess.run(G_solver, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim), CG: Y_batch})
+            else:
+                _ = sess.run(G_solver,feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim)})
 
-        D_loss_curr, G_loss_curr = sess.run([D_loss, G_loss], feed_dict={X: X_batch,
-                                                                         Z: sample_Z(batch_size, seq_length, latent_dim)})
-        D_loss_curr = np.mean(D_loss_curr)
-        G_loss_curr = np.mean(G_loss_curr)
+
+        # get loss
+        if cond_option is True:
+            D_loss_curr, G_loss_curr = sess.run([D_loss, G_loss], feed_dict={X: X_batch,
+                                                                             Z: sample_Z(batch_size, seq_length, latent_dim),
+                                                                             CG: Y_batch, CD: Y_batch})
+            D_loss_curr = np.mean(D_loss_curr)
+            G_loss_curr = np.mean(G_loss_curr)
+        else:
+            D_loss_curr, G_loss_curr = sess.run([D_loss, G_loss], feed_dict={X: X_batch,
+                                                                             Z: sample_Z(batch_size, seq_length, latent_dim)})
+            D_loss_curr = np.mean(D_loss_curr)
+            G_loss_curr = np.mean(G_loss_curr)
 
         if i % 50 == 0 and i != 0:
-            print("Iteration: %d\t Discriminator loss: %.4f\t Generator loss: %.4f." % (i, D_loss_curr, G_loss_curr))
+            print(
+                "Iteration: %d\t Discriminator loss: %.4f\t Generator loss: %.4f." % (i, D_loss_curr, G_loss_curr))
         if i % 100 == 0 and i != 0:
-            answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim)})
+            answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim),
+                                                   CG: (np.random.choice([1], size=(batch_size, 1)))})
             fig = plt.figure()
+            plt.title("Epoch " + str(epoch) + " iter " + str(i))
             plt.plot(answer[0])
-            name = "./Plots/epoch_" + str(epoch) + "_iter_" + str(i) + "_test.png"
+            name = "./Plots/source" + str(epoch) + str(i) + ".jpeg"
             fig.savefig(name, dpi=fig.dpi)
             plt.show(block=False)
             time.sleep(3)
             plt.close('all')
 
+
+
     return D_loss_curr, G_loss_curr
 
 
-def sine_wave(seq_length=30, num_samples=28*5*100, num_signals=1,
-        freq_low=1, freq_high=5, amplitude_low = 0.1, amplitude_high=0.9):
+def sine_wave(cond=False, seq_length=30, num_samples=28*5*100, num_signals=1,
+              freq_low=1, freq_high=5, amplitude_low = 0.1, amplitude_high=0.9):
     ix = np.arange(seq_length) + 1
     samples = []
+    cond_array = []
     for i in range(num_samples):
         signals = []
         for i in range(num_signals):
@@ -147,9 +194,26 @@ def sine_wave(seq_length=30, num_samples=28*5*100, num_signals=1,
             # offset
             offset = np.random.uniform(low=-np.pi, high=np.pi)
             signals.append(A*np.sin(2*np.pi*f*ix/float(seq_length) + offset))
+            cond_array.append(0)
         samples.append(np.array(signals).T)
-    samples = np.array(samples)
-    return samples
+
+
+    # ADDED TO KNOW WHAT TO EXPECT WHEN FEEDING CONDITION
+    if cond is True:
+        for i in range(100):
+            sigs = []
+            for i in range(1):
+                offset = np.random.uniform(low=-np.pi, high=np.pi)
+                sigs.append(A * np.sin(2 * np.pi * 5 * ix / float(seq_length) + offset))
+                cond_array.append(1)
+            samples.append(np.array(sigs).T)
+
+        samples = np.array(samples)
+        cond_array = np.array(cond_array)
+    if cond is True:
+        return samples, cond_array
+    else:
+        return samples
 
 
 def main():
@@ -159,15 +223,21 @@ def main():
     num_features = 1
     learning_rate = 0.1
     num_epochs = 100
-    samples = sine_wave()
 
-    Z, X = def_placeholders(batch_size, seq_length, latent_dim, num_features)
+    cond_option = True
 
-    D_loss, G_loss = def_loss(Z, X, seq_length, batch_size)
+    if cond_option is True:
+        samples, cond_array = sine_wave(cond_option)
+        Z, X, CG, CD = def_placeholders(batch_size, seq_length, latent_dim, num_features, cond_option)
+        D_loss, G_loss = def_loss(Z, X, seq_length, batch_size, cond_option, CG, CD)
+        G_sample = generator(Z, seq_length, batch_size, CG, cond_option, reuse=True)
+    else:
+        samples = sine_wave()
+        Z, X = def_placeholders(batch_size, seq_length, latent_dim, num_features)
+        D_loss, G_loss = def_loss(Z, X, seq_length, batch_size)
+        G_sample = generator(Z, seq_length, batch_size, reuse=True)
 
     D_solver, G_solver = def_opt(D_loss, G_loss, learning_rate)
-
-    G_sample = generator(Z, seq_length, batch_size, reuse=True)
 
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
@@ -180,15 +250,21 @@ def main():
     G_loss_arr = []
 
     for epoch in range(num_epochs):
-        D_loss_curr, G_loss_curr = train_epochs(sess, samples, batch_size, seq_length, latent_dim,
-                                                D_solver, G_solver, X, Z, D_loss, G_loss, G_sample, epoch)
-
+        if cond_option is True:
+            D_loss_curr, G_loss_curr = train_epochs(sess, samples, batch_size, seq_length, latent_dim,
+                                                    D_solver, G_solver, X, Z, D_loss, G_loss, G_sample,
+                                                    epoch, CG, CD, cond_array, cond_option)
+        else:
+            D_loss_curr, G_loss_curr = train_epochs(sess, samples, batch_size, seq_length, latent_dim,
+                                                    D_solver, G_solver, X, Z, D_loss, G_loss, G_sample,
+                                                    epoch)
         D_loss_arr.append(D_loss_curr)
         G_loss_arr.append(G_loss_curr)
         print("Epoch: %d\t Discriminator loss: %.4f\t Generator loss: %.4f." % (epoch, D_loss_curr, G_loss_curr))
         # shuffle the training data
         perm = np.random.permutation(samples.shape[0])
         samples = samples[perm]
+        cond_array = cond_array[perm]
 
         fig = plt.figure()
         plt.title('G and D Losses')
