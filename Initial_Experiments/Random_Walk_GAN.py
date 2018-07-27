@@ -18,6 +18,8 @@ from sklearn.preprocessing import MinMaxScaler, normalize
 import sys
 import datetime
 import time
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 def import_csv():
@@ -71,7 +73,7 @@ def G():
     return model
 
 
-def train(data,disc_model,gen_model,combined,scalar,batch_size=10,train_steps=50):
+def train(data,disc_model,gen_model,combined,scalar,batch_size=10,train_steps=1000):
     # Adversarial ground truths
     valid = np.ones((batch_size, 1))
     # valid = np.random.normal(0.7,1.2,size=[batch_size,1])
@@ -85,7 +87,13 @@ def train(data,disc_model,gen_model,combined,scalar,batch_size=10,train_steps=50
         # TODO this should be replaced by gen_model.predict()
         # gen_data = gen_model(tf.convert_to_tensor(noise,tf.float32))
         gen_data = gen_model.predict(noise)
-        data_ten = get_next_ten(data,x)
+
+
+        start_num = int(np.random.uniform(0, 1) * len(data))
+        if start_num > (len(data) - batch_size):
+            start_num -= batch_size
+        data_ten = get_next_ten(data, start_num, batch_size)
+
         data_ten = np.reshape(data_ten, (10, 1, 1))
 
         # train discriminator
@@ -138,7 +146,13 @@ def main():
     data_series = pd.DataFrame(data)
     scalar = MinMaxScaler(feature_range=(-1,1))
     data = scalar.fit_transform(data_series)
+
+    data = np.arange(0,-5000,-1,dtype=float)
+    scaler = MinMaxScaler(feature_range=(-1,1))
+    data = scaler.fit_transform(data.reshape(-1,1))
     # TODO scalar.inverse_transform(data) at the end to get the data
+
+    # plt.plot(scalar.inverse_transform(gen_model.predict(noise).reshape(-1, 1)))
 
     # build generator
     z = Input(shape=(1,1,),dtype=tf.float32)
@@ -178,47 +192,45 @@ def main():
     noise = np.random.normal(-1, 1, (10, 1, 1))
     # gen_data_d = gen_model(tf.convert_to_tensor(noise, dtype=tf.float32))
     # print(gen_data_d)
-    to_predict = data[490:500].copy()
-    to_predict = np.reshape(to_predict, (10, 1, 1))
-    to_predict = np.float32(to_predict)
-    answer = gen_model.predict(to_predict)
-    answer_r = answer.copy().reshape((10,1))
-    un_normed_answer = scalar.inverse_transform(answer_r)
-    answer_n = gen_model.predict(noise)
-    answer_rn = answer_n.copy().reshape((10, 1))
-    un_normed_answer_n = scalar.inverse_transform(answer_rn)
-    print('******DATA USED******')
-    print('DATA: ',scalar.inverse_transform(data[490:500]))
-    print('******ANSWERS WITH DATA BEING USED AS INPUT INTO GENERATOR******')
-    print('UNNORMALISED ANSWER: ',un_normed_answer[0])
-    print('NORMALISED ANSWER: ',answer_r[0])
-    print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer)[0])
-    print('******ANSWERS WITH NOISE BEING USED AS INPUT INTO GENERATOR******')
-    print('UNNORMALISED ANSWER: ',un_normed_answer_n[0])
-    print('NORMALISED ANSWER: ',answer_rn[0])
-    print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer_n)[0])
-    print('******ACTUAL ANSWER******')
-    print('UNNORMALISED: ',scalar.inverse_transform(data[500].reshape(1,-1)))
-    print('NORMALISED: ', data[500])
-    print('Time taken: ', time.time()-start_time)
-    print('******TOTAL GEN ANSWER******')
-    print('NOISE ANSWER UNNORMED')
-    print(un_normed_answer_n)
-    print('INPUT ANSWER UNNORMED')
-    print(un_normed_answer)
-    print('MSE w/ data: ',((un_normed_answer - data[500:510]) ** 2).mean(axis=0))
-    print('MSE w/ noise: ',((un_normed_answer_n - data[500:510]) ** 2).mean(axis=0))
-    plt.plot(un_normed_answer_n,color='green',label='Unnormed Answer Noise')
-    plt.plot(un_normed_answer, color='red',label='Unnormed Answer Data')
-    plt.plot(scalar.inverse_transform(data[500:510]),color='blue',label='Actual Answer')
-    plt.legend()
+    # to_predict = data[490:500].copy()
+    # to_predict = np.reshape(to_predict, (10, 1, 1))
+    # to_predict = np.float32(to_predict)
+    # answer = gen_model.predict(to_predict)
+    # answer_r = answer.copy().reshape((10,1))
+    # un_normed_answer = scalar.inverse_transform(answer_r)
+    # answer_n = gen_model.predict(noise)
+    # answer_rn = answer_n.copy().reshape((10, 1))
+    # un_normed_answer_n = scalar.inverse_transform(answer_rn)
+    plt.plot(gen_model.predict(noise).reshape(-1, 1))
+    # print('******DATA USED******')
+    # print('DATA: ',scalar.inverse_transform(data[490:500]))
+    # print('******ANSWERS WITH DATA BEING USED AS INPUT INTO GENERATOR******')
+    # print('UNNORMALISED ANSWER: ',un_normed_answer[0])
+    # print('NORMALISED ANSWER: ',answer_r[0])
+    # print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer)[0])
+    # print('******ANSWERS WITH NOISE BEING USED AS INPUT INTO GENERATOR******')
+    # print('UNNORMALISED ANSWER: ',un_normed_answer_n[0])
+    # print('NORMALISED ANSWER: ',answer_rn[0])
+    # print('DISCRIMINATOR PROB. VALUE: ',disc_model.predict(answer_n)[0])
+    # print('******ACTUAL ANSWER******')
+    # print('UNNORMALISED: ',scalar.inverse_transform(data[500].reshape(1,-1)))
+    # print('NORMALISED: ', data[500])
+    # print('Time taken: ', time.time()-start_time)
+    # print('******TOTAL GEN ANSWER******')
+    # print('NOISE ANSWER UNNORMED')
+    # print(un_normed_answer_n)
+    # print('INPUT ANSWER UNNORMED')
+    # print(un_normed_answer)
+    # print('MSE w/ data: ',((un_normed_answer - data[500:510]) ** 2).mean(axis=0))
+    # print('MSE w/ noise: ',((un_normed_answer_n - data[500:510]) ** 2).mean(axis=0))
+    # plt.plot(un_normed_answer_n,color='green',label='Unnormed Answer Noise')
+    # plt.plot(un_normed_answer, color='red',label='Unnormed Answer Data')
+    # plt.plot(scalar.inverse_transform(data[500:510]),color='blue',label='Actual Answer')
+    # plt.legend()
     plt.show()
 
-def get_next_ten(data,x):
-    if x == 0:
-        return data[0:10]
-    else:
-        return data[x*10:((x*10)+10)]
+def get_next_ten(all_data,start_num,batch_size):
+    return all_data[start_num:(start_num+batch_size)]
 
 
 if __name__ == '__main__':

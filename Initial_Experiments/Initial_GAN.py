@@ -39,7 +39,7 @@ def G():
 
     # (NumberOfSamples, TimeSteps, Features)
     # define generator model architecture
-    model.add(LSTM(4, batch_input_shape=(1,1,4),stateful=True,kernel_initializer='random_uniform',
+    model.add(LSTM(1, batch_input_shape=(1,1,1),stateful=True,kernel_initializer='random_uniform',
                    bias_initializer='zeros',return_sequences=True))
     model.add(Activation('tanh'))
     model.add(LSTM(10))
@@ -59,7 +59,7 @@ def D():
     model.add(LeakyReLU(alpha=0.2))
     model.add(LSTM(10))
     model.add(LeakyReLU(alpha=0.2))
-    model.add(Flatten())
+    # model.add(Flatten())
     model.add(Dense(1,activation='sigmoid'))
     model.summary()
     return model
@@ -80,7 +80,7 @@ def main():
     RMSprop(lr=0.003,decay=6e-8)
 
     # (NumberOfSamples, TimeSteps, Features)
-    X = data.reshape(len(data), 1, 4)
+    X = data.reshape(len(data), 1, 1)
     print(X.shape)
     num_epochs = 10
 
@@ -90,22 +90,22 @@ def main():
 
     # generate random samples for discriminator
     # fake_x = random.sample(range(1,100),200)
-    fake_x = [randint(0,100) for p in range(0,200)]
+    # fake_x = [randint(0,100) for p in range(0,200)]
 
     real_x = X[:,:,2]
     for i in range(num_epochs):
         # test_model.fit(X,target_data,epochs=1,batch_size=1, shuffle=False)
         # test_model.reset_states()
 
-        # d_loss_real = test_model.train_on_batch(real_x,valid)
-        # d_loss_fake = test_model.train_on_batch(fake_x,fake)
+        d_loss_real = test_model.train_on_batch(real_x,valid)
+        d_loss_fake = test_model.train_on_batch(fake_x,fake)
 
         test_model.reset_states()
 
     # need to make the data stationary
 
     x = np.array([99.825, 99.825, 99.825, 1])
-    x = x.reshape(1, 1, 4)
+    x = x.reshape(1, 4)
     print(test_model.predict(x))
 
     # G()
