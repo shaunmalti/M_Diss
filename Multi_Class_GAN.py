@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.contrib.rnn import LSTMCell
+from tensorflow.contrib.rnn import LSTMCell, DropoutWrapper, MultiRNNCell
 import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
@@ -49,15 +49,15 @@ def generator(Z, seq_length, batch_size, CG=None, cond=False,  num_generated_fea
         W_out_G = tf.get_variable(name='W_out_G', shape=[hidden_units_g, num_generated_features],
                                   initializer=W_out_G_initializer)
         b_out_G = tf.get_variable(name='b_out_G', shape=num_generated_features, initializer=b_out_G_initializer)
-        scale_out_G = tf.get_variable(name='scale_out_G', shape=1, initializer=scale_out_G_initializer,
-                                      trainable=learn_scale)
         if cond is True:
             condition = tf.stack([CG] * seq_length, axis=1)
             inputs = tf.concat([Z, condition], axis=2)
         else:
             inputs = Z
 
-        cell = LSTMCell(num_units=hidden_units_g, state_is_tuple=True, initializer=lstm_initializer, reuse=reuse)
+        # cell = LSTMCell(num_units=hidden_units_g, state_is_tuple=True, initializer=lstm_initializer, reuse=reuse)
+        cell = MultiRNNCell([create_cell(2), create_cell(10), create_cell(100)], state_is_tuple=True)
+
 
         rnn_outputs, rnn_states = tf.nn.dynamic_rnn(cell=cell, dtype=tf.float32,
                                                     sequence_length=[seq_length]*batch_size, inputs=inputs)
@@ -67,6 +67,11 @@ def generator(Z, seq_length, batch_size, CG=None, cond=False,  num_generated_fea
         output_2d = tf.nn.tanh(logits_2d)
         output_3d = tf.reshape(output_2d, [-1, seq_length, num_generated_features])
     return output_3d
+
+def create_cell(size):
+    lstm_cell = LSTMCell(size,forget_bias=0.7, state_is_tuple=True)
+    lstm_cell = DropoutWrapper(lstm_cell)
+    return lstm_cell
 
 
 def discriminator(X, seq_length, batch_size, CD=None, cond=False, hidden_units_d=100, reuse=False):
@@ -86,7 +91,6 @@ def discriminator(X, seq_length, batch_size, CD=None, cond=False, hidden_units_d
 
         cell = tf.contrib.rnn.LSTMCell(num_units=hidden_units_d, state_is_tuple=True, reuse=reuse)
         rnn_outputs, rnn_states = tf.nn.dynamic_rnn(cell=cell, dtype=tf.float32, inputs=inputs)
-
         logits = tf.einsum('ijk,km', rnn_outputs, W_out_D) + b_out_D
         output = tf.nn.sigmoid(logits)
 
@@ -108,7 +112,7 @@ def sample_Z(batch_size, seq_length, latent_dim):
     sample = np.float32(np.random.normal(size=[batch_size, seq_length, latent_dim]))
     return sample
 
-def get_next_batch(batch_num, batch_size, samples, cond, cond_array):
+def get_next_batch(batch_num, batch_size, samples, cond=False, cond_array=None):
     sample_num_start = batch_num * batch_size
     sample_num_end = sample_num_start + batch_size
     if cond is True:
@@ -165,8 +169,11 @@ def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_
             print(
                 "Iteration: %d\t Discriminator loss: %.4f\t Generator loss: %.4f." % (i, D_loss_curr, G_loss_curr))
         if i % 100 == 0 and i != 0:
-            answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim),
+            if cond_option == True:
+                answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim),
                                                    CG: (np.random.choice([1], size=(batch_size, 1)))})
+            else:
+                answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim)})
             fig = plt.figure()
             plt.title("Epoch " + str(epoch) + " iter " + str(i))
             plt.plot(answer[0])
@@ -208,8 +215,16 @@ def sine_wave(cond=False, seq_length=30, num_samples=28*5*100, num_signals=1,
                 cond_array.append(1)
             samples.append(np.array(sigs).T)
 
-        samples = np.array(samples)
-        cond_array = np.array(cond_array)
+    samples = np.array(samples)
+    cond_array = np.array(cond_array)
+
+    fig = plt.figure()
+    plt.title('Reference Example from Data')
+    plt.plot(samples[10])
+    plt.legend()
+    name = "./Plots/REFERENCE.png"
+    fig.savefig(name, dpi=fig.dpi)
+
     if cond is True:
         return samples, cond_array
     else:
@@ -224,7 +239,7 @@ def main():
     learning_rate = 0.1
     num_epochs = 100
 
-    cond_option = True
+    cond_option = False
 
     if cond_option is True:
         samples, cond_array = sine_wave(cond_option)
@@ -264,8 +279,10 @@ def main():
         # shuffle the training data
         perm = np.random.permutation(samples.shape[0])
         samples = samples[perm]
-        cond_array = cond_array[perm]
-
+        if cond_option == True:
+            cond_array = cond_array[perm]
+        else:
+            continue
         fig = plt.figure()
         plt.title('G and D Losses')
         plt.plot(D_loss_arr, color='r', label='D')
