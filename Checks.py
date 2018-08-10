@@ -44,6 +44,64 @@ def tsplot(y, lags=None, figsize=(10, 8), style='bmh'):
         plt.show()
     return
 
+def hurst(ts):
+    # calculate standard deviation of differenced series using various lags
+    lags = range(2, 20)
+    tau = [sqrt(std(subtract(ts[lag:], ts[:-lag]))) for lag in lags]
+    m = polyfit(log(lags), log(tau), 1)
+    return m[0] * 2.0
+
+data = pd.read_csv('C_generated_unnormed.csv', header=None)
+vals = data.values
+vals = np.ndarray.flatten(vals[0:50])
+
+test2 = np.ndarray.flatten(vals[50:100])
+print(hurst(cumsum(test2)))
+
+C_data = pd.read_csv('C.txt')["Close"].values
+x = np.r_[C_data[0], np.ndarray.flatten(vals)].cumsum()
+# another thing to do - do not do differencing on data when training
+# print(hurst(vals))
+# tsplot(vals,lags=30)
+plt.plot(vals)
+plt.show()
+
+#
+
+
+exit()
+
+"""PARAMS - alphas = np.array([0.5, -0.25])
+betas = np.array([0.5, -0.3])"""
+"""this is a check for move avg autoreg"""
+data = pd.read_csv('Move_Avg_AutoReg_1000.csv', header=None)
+vals = data.values
+for i in range(int(len(vals)/10)):
+    try:
+        mdl = smt.ARMA(np.ndarray.flatten(vals[(i*10):(i*10)+10]), order=(2, 2)).fit(
+            maxlag=30, method='mle', trend='nc')
+        print(mdl.summary())
+    except:
+        pass
+# mdl = smt.ARMA(np.ndarray.flatten(vals), order=(2, 2)).fit(
+#     maxlag=30, method='mle', trend='nc')
+# print(mdl.summary())
+exit()
+
+"""This is a check for moving average x1000"""
+data = pd.read_csv('Move_Avg_1000.csv', header=None)
+vals = data.values
+for i in range(int(len(vals)/10)):
+    mdl = smt.ARMA(np.ndarray.flatten(vals[(i*10):(i*10)+10]), order=(0, 1)).fit(
+                maxlag=30, method='mle', trend='nc')
+    print(mdl.summary())
+mdl = smt.ARMA(np.ndarray.flatten(vals), order=(0, 1)).fit(
+                maxlag=30, method='mle', trend='nc')
+print(mdl.summary())
+
+
+exit()
+
 option = 2
 
 if option == 1:

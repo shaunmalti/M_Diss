@@ -118,16 +118,16 @@ def generator(Z, seq_length, batch_size, CG=None, cond=False,  num_generated_fea
         """TODO here LSTMCell was changed to a MultiRNNCell with stacked LSTM layers,
         this seems to 'converge' faster than the original solution - without conditioning
         with conditioning also works but takes slightly longer to converge"""
-        cell = LSTMCell(num_units=hidden_units_g, state_is_tuple=True, initializer=lstm_initializer, reuse=reuse)
+        cell = LSTMCell(num_units=hidden_units_g, state_is_tuple=True, initializer=lstm_initializer, reuse=reuse, name='lstm_g')
         # cell = MultiRNNCell([create_cell(2, reuse, lstm_initializer), create_cell(10, reuse, lstm_initializer),
         #                      create_cell(100, reuse, lstm_initializer)], state_is_tuple=True)
         rnn_outputs, rnn_states = tf.nn.dynamic_rnn(cell=cell, dtype=tf.float32,
                                                       inputs=inputs)
 
-        rnn_outputs_2d = tf.reshape(rnn_outputs, [-1, hidden_units_g])
+        rnn_outputs_2d = tf.reshape(rnn_outputs, [-1, hidden_units_g], name='reshape_output')
         logits_2d = tf.matmul(rnn_outputs_2d, W_out_G) + b_out_G
-        output_2d = tf.nn.tanh(logits_2d)
-        output_3d = tf.reshape(output_2d, [-1, seq_length, num_generated_features])
+        output_2d = tf.nn.tanh(logits_2d, name='tanh_g')
+        output_3d = tf.reshape(output_2d, [-1, seq_length, num_generated_features], name='output_g')
     return output_3d
 
 def create_cell(size, reuse, lstm_init):
@@ -194,14 +194,14 @@ def get_next_batch(batch_num, batch_size, samples, cond=False, cond_array=None):
 
 
 def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_solver,
-                 X, Z, D_loss, G_loss, G_sample, epoch, scalar, option, CG=None, CD=None, cond_array=None, cond_option=False):
+                 X, Z, D_loss, G_loss, G_sample, epoch, scalar, CG=None, CD=None, cond_array=None, cond_option=False):
     # TODO this was changed - 5-1 to 1-5 - see effect
     D_rounds = 5
     G_rounds = 1
 
     # for i in range(0,int(len(samples) / batch_size)):
-    for i in range(0, 450):
-    # for i in range(0,10):
+    # for i in range(0, 450):
+    for i in range(0,10):
         # update discriminator
         for d in range(D_rounds):
             if cond_option is True:
@@ -215,7 +215,6 @@ def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_
                 _ = sess.run(D_solver, feed_dict={X: X_batch, Z: Z_batch, CD: Y_batch, CG: Y_batch})
             else:
                 _ = sess.run(D_solver, feed_dict={X: X_batch, Z: Z_batch})
-
         # update generator
         for g in range(G_rounds):
             if cond_option is True:
@@ -225,7 +224,6 @@ def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_
                 _ = sess.run(G_solver, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim), CG: Y_batch})
             else:
                 _ = sess.run(G_solver,feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim)})
-
         # get loss
         if cond_option is True:
             D_loss_curr, G_loss_curr = sess.run([D_loss, G_loss], feed_dict={X: X_batch,
@@ -242,42 +240,27 @@ def train_epochs(sess, samples, batch_size, seq_length, latent_dim, D_solver, G_
         if i % 50 == 0 and i != 0:
             print(
                 "Iteration: %d\t Discriminator loss: %.4f\t Generator loss: %.4f." % (i, D_loss_curr, G_loss_curr))
-        # if i % 100 == 0 and i != 0:
         if i % 100 == 0:
             if cond_option == True:
                 answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, seq_length, latent_dim),
                                                    CG: (np.random.choice([0.5], size=(batch_size, 1)))})
             else:
                 # TODO batch_size changed to 1
-                answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, 1000
+                answer = sess.run(G_sample, feed_dict={Z: sample_Z(batch_size, 5000
                                                                    , latent_dim)})
-            # answer = scalar.inverse_transform(np.reshape(answer,newshape=(batch_size,1000)))
-            answer = scalar.inverse_transform(np.reshape(answer,newshape=(100,100)))
-            # """Autoregressive = 3
-            #     Moving Average = 2
-            #     AutoReg Mov Avg = 1"""
-            if option == 1:
-                np.savetxt("Move_Avg_AutoReg_1000.csv", answer, delimiter=',')
-            elif option == 2:
-                np.savetxt("Move_Avg.csv", answer, delimiter=',')
-            elif option == 3:
-                np.savetxt("Regressive_2.csv", answer, delimiter=',')
-
+            np.savetxt("C_generated_not_diff_normed.csv", answer, delimiter=',')
+            answer = scalar.inverse_transform(np.reshape(answer,newshape=(500,100)))
+            np.savetxt("C_generated_not_diff_unnormed.csv", answer, delimiter=',')
     return D_loss_curr, G_loss_curr
 
 
-def run(data, scalar, cond_option, option):
-    """
-    OPTION KEY
-    Autoregressive = 3
-    Moving Average = 2
-    AutoReg Mov Avg = 1"""
+def run(data, scalar, cond_option=False):
     batch_size = 10
     seq_length = 100
     latent_dim = 1
     num_features = 1
     learning_rate = 0.1
-    num_epochs = 100
+    num_epochs = 1
 
     if cond_option is True:
         Z, X, CG, CD = def_placeholders(batch_size, seq_length, latent_dim, num_features, cond_option)
@@ -301,12 +284,12 @@ def run(data, scalar, cond_option, option):
             time_before = time.time()
             D_loss_curr, G_loss_curr = train_epochs(sess, data, batch_size, seq_length, latent_dim,
                                                     D_solver, G_solver, X, Z, D_loss, G_loss, G_sample,
-                                                    epoch, scalar, option, CG, CD, cond_array, cond_option)
+                                                    epoch, scalar, CG, CD, cond_array, cond_option)
         else:
             time_before = time.time()
             D_loss_curr, G_loss_curr = train_epochs(sess, data, batch_size, seq_length, latent_dim,
                                                     D_solver, G_solver, X, Z, D_loss, G_loss, G_sample,
-                                                    epoch, scalar, option)
+                                                    epoch, scalar)
         print("Epoch Time: ", time.time()-time_before)
         D_loss_arr.append(D_loss_curr)
         G_loss_arr.append(G_loss_curr)
@@ -322,130 +305,60 @@ def run(data, scalar, cond_option, option):
             plt.plot(D_loss_arr, color='r', label='D')
             plt.plot(G_loss_arr, color='b', label='G')
             plt.legend()
-            name = "./Plots/epoch_" + str(epoch) + "_losses_move_avg_autoreg.png"
+            name = "./Plots/epoch_" + str(epoch) + "_losses_c.png"
             fig.savefig(name, dpi=fig.dpi)
 
-    save_path = saver.save(sess, "./Models/model_move_avg_auto_1000.ckpt")
+    save_path = saver.save(sess, "./Models/model_c.ckpt")
     print("Model saved in path: %s" % save_path)
 
 
-
-def get_data(option, conditional=False):
-    if option == 1:
-        alphas = np.array([0.5, -0.25])
-        betas = np.array([0.5, -0.3])
-        ar = np.r_[1, -alphas]
-        ma = np.r_[1, betas]
-        n = int(100)
-        burn = int(n / 10)  # number of samples to discard before fit
-        arma22 = smt.arma_generate_sample(ar=ar, ma=ma, nsample=n, burnin=burn)
-
-        samples = []
-        cond_arr = []
-        n_lists = 10000
-        for j in range(n_lists):
-            signals = []
-            cond_sig = []
-            signals.append(smt.arma_generate_sample(ar=ar, ma=ma, nsample=n, burnin=burn))
-            for i in range(0, n):
-                cond_sig.append([alphas,betas])
-            samples.append(np.array(signals).T)
-            cond_arr.append(np.array(cond_sig).T)
-        samples = np.array(samples)
-        scalar = MinMaxScaler(feature_range=(-1, 1))
-        samples = np.reshape(samples, newshape=(n_lists, n))
-        scalar.fit(samples)
-
-        samples = scalar.transform(samples)
-        samples = np.reshape(samples, newshape=[len(samples), n, 1])
-        if conditional == True:
-            return samples, cond_arr, scalar
-        else:
-            return samples, scalar
-
-    elif option == 2:
-
-        n_samples = int(100)
-        n = int(100)
-        b = 0.6
-        alphas = np.array([0.])
-        betas = np.array([0.6])
-
-        # add zero-lag and negate alphas
-        ar = np.r_[1, -alphas]
-        ma = np.r_[1, betas]
-
-        samples = []
-        cond_arr = []
-        n_lists = 10000
-        for j in range(n_lists):
-            # x = w = np.random.normal(size=n_samples)
-            signals = []
-            cond_sig = []
-            signals.append(smt.arma_generate_sample(ar=ar, ma=ma, nsample=n))
-            if conditional == True:
-                for i in range(0, n):
-                    cond_sig.append(b)
-            samples.append(np.array(signals).T)
-            cond_arr.append(np.array(cond_sig).T)
-        samples = np.array(samples)
-        cond_arr = np.array(cond_arr)
-        scalar = MinMaxScaler(feature_range=(-1, 1))
-        samples = np.reshape(samples, newshape=(n_lists, n_samples))
-        scalar.fit(samples)
-
-        samples = scalar.transform(samples)
-        samples = np.reshape(samples, newshape=[len(samples), n_samples, 1])
-        if conditional == True:
-            return samples, cond_arr, scalar
-        else:
-            return samples, scalar
-
-    elif option == 3:
-        # autoregressive model
-        # dependent variable is regressed against one or more lagged values
-        samples = []
-        cond_arr = []
-        n_lists = 10000
-        n_samples = int(100)
-        a = 0.6
-        for j in range(n_lists):
-            x = w = np.random.normal(size=n_samples)
-            signals = []
-            cond_sig = []
-            for j in range(n_samples):
-                signals.append(a * x[j - 1] + w[j])
-                if conditional == True:
-                    cond_sig.append(a)
-            samples.append(np.array(signals).T)
-            cond_arr.append(np.array(cond_sig).T)
-        samples = np.array(samples)
-        cond_arr = np.array(cond_arr)
-        scalar = MinMaxScaler(feature_range=(-1, 1))
-        scalar.fit(samples)
-        samples = scalar.transform(samples)
-
-        samples = np.reshape(samples, newshape=[len(samples), n_samples, 1])
-        if conditional == True:
-            return samples, cond_arr, scalar
-        else:
-            return samples, scalar
-
-
 def main():
-    """Autoregressive = 3
-        Moving Average = 2
-        AutoReg Mov Avg = 1"""
-    option = 1
-    conditional = False
-    if conditional == True:
-        samples, cond_arr, scalar = get_data(option, conditional)
-    else:
-        samples, scalar = get_data(option)
-    run(samples, scalar, conditional, option)
+    # import from csv
+    data = pd.read_csv("./C.txt")["Close"].values
+    print(max(data))
+    print(min(data))
+    # getting info by fitting an arma(2,2) model
+    # mdl = smt.ARMA(np.diff(data), order=(2, 2)).fit(maxlag=30, method='mle', trend='nc')
+    # print(mdl.summary())
+    # print(hurst(data))
 
+    # info from fitting a garch(1,1) model
+    # am = arch_model(data)
+    # res = am.fit(update_freq=5)
+    # print(res.summary())
 
+    # graphs to check correlation
+    # tsplot(data,lags=30)
+    # tsplot(np.diff(data),lags=30)
 
+    # difference to remove stationarity
+    data = np.diff(data)
+    # to reobtain un-differenced data - np.r_[data[0], np.diff(data)].cumsum()
+
+    # make sequences with 100 steps
+    samples = []
+    n_lists = 1000
+    n_samples = int(100)
+    for i in range(len(data)-n_samples):
+        signals = []
+        for j in range(n_samples):
+            signals.append(data[i+j])
+        samples.append(np.array(signals).T)
+    samples = np.array(samples)
+
+    # rescale for lstm
+    scalar = MinMaxScaler(feature_range=(-1, 1))
+    scalar.fit(samples)
+    samples = scalar.transform(samples)
+
+    # randomly shuffle and set data to permutation array
+    perm = np.random.permutation(samples.shape[0])
+    samples = samples[perm]
+
+    # reshape to 3d due to lstm
+    samples = np.reshape(samples, newshape=[len(samples), n_samples, 1])
+
+    run(samples,scalar)
 
 if __name__ == '__main__':
     main()
